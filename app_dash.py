@@ -1,5 +1,5 @@
 import dash
-from dash import html, dcc, Input, Output, State, callback_context
+from dash import html, dcc, Input, Output, State
 import dash_bootstrap_components as dbc
 import pandas as pd
 import re
@@ -34,7 +34,6 @@ print("✅ Setup complete!")
 app = dash.Dash(__name__, external_stylesheets=[dbc.themes.BOOTSTRAP])
 server = app.server
 
-# Layout
 app.layout = dbc.Container([
     html.H1("🎬 Advanced Hybrid Movie Recommender", className="text-center my-4"),
 
@@ -45,90 +44,113 @@ app.layout = dbc.Container([
                 dbc.CardBody([
                     html.H4("📊 Model Performance", className="card-title"),
                     html.Div([
-                        html.P(f"RMSE: {eval_metrics['rmse']:.4f}"),
-                        html.P(f"MAE: {eval_metrics['mae']:.4f}"),
-                        html.P(f"Precision@10: {eval_metrics['precision']:.4f}"),
-                        html.P(f"Recall@10: {eval_metrics['recall']:.4f}"),
-                        html.P(f"F1@10: {eval_metrics['f1']:.4f}"),
-                        html.P(f"NDCG@10: {eval_metrics['ndcg']:.4f}"),
+                        html.P(f"RMSE: {eval_metrics.get('RMSE', 'N/A')}", className="mb-1"),
+                        html.P(f"MAE: {eval_metrics.get('MAE', 'N/A')}", className="mb-1"),
+                        html.P(f"Precision@10: {eval_metrics.get('Precision@10', 'N/A')}", className="mb-1"),
+                        html.P(f"NDCG@10: {eval_metrics.get('NDCG@10', 'N/A')}", className="mb-1"),
                     ])
                 ])
             ], className="mb-4")
         ])
     ]),
 
+    # Personalized Recommendations
     dbc.Row([
-        # CF Recommendations Section
         dbc.Col([
-            html.H3("🤖 Personalized Recommendations"),
-            html.P("Select a user ID to get recommendations based on their past ratings.", className="text-muted"),
-            dcc.Dropdown(
-                id='user-dropdown',
-                options=[{'label': u, 'value': u} for u in df_ratings['user'].unique()],
-                value=df_ratings['user'].unique()[0],
-                clearable=False
-            ),
-            html.Br(),
-            dbc.ListGroup(id='cf-recommendations')
-        ]),
+            dbc.Card([
+                dbc.CardBody([
+                    html.H4("👤 Personalized Recommendations", className="card-title"),
+                    html.Label("Select User ID:"),
+                    dcc.Dropdown(
+                        id='user-dropdown',
+                        options=[{'label': f'User {u}', 'value': u} for u in sorted(df_ratings['user'].unique()[:50])],
+                        value=df_ratings['user'].unique()[0],
+                        placeholder="Choose a user..."
+                    ),
+                    html.Br(),
+                    dbc.Spinner(html.Div(id='cf-recommendations'))
+                ])
+            ], className="mb-4")
+        ])
+    ]),
 
-        # Genre Filter Section
+    # Genre-Based Recommendations
+    dbc.Row([
         dbc.Col([
-            html.H3("🎭 Explore by Genre"),
-            html.P("Select one or more genres to see movies in those categories.", className="text-muted"),
-            dbc.Checklist(
-                options=[{'label': g, 'value': g} for g in genre_cols if g != 'unknown'],
-                value=[],
-                id='genre-checklist',
-                inline=True
-            ),
-            html.Br(),
-            dbc.ListGroup(id='genre-results')
-        ]),
+            dbc.Card([
+                dbc.CardBody([
+                    html.H4("🎭 Genre-Based Discovery", className="card-title"),
+                    dbc.Checklist(
+                        options=[{'label': g.replace("'", ""), 'value': g} for g in genre_cols if g != 'unknown'],
+                        value=[],
+                        id='genre-checklist',
+                        inline=True,
+                        style={'flexWrap': 'wrap'}
+                    ),
+                    html.Br(),
+                    dbc.Spinner(html.Div(id='genre-results'))
+                ])
+            ], className="mb-4")
+        ])
+    ]),
 
-        # Search Section
+    # Smart Search
+    dbc.Row([
         dbc.Col([
-            html.H3("🔍 Search & Hybrid Recommendations"),
-            html.P("Get smart recommendations based on a movie title or keyword.", className="text-muted"),
-            dbc.InputGroup(
-                [
-                    dbc.Input(id='search-input', type='text', placeholder='e.g., Star Wars, The Godfather...', debounce=True),
-                    dbc.Button("Search", id="search-button", n_clicks=0, color="primary")
-                ],
-                className="mb-3"
-            ),
-            html.Div(id='search-results')
+            dbc.Card([
+                dbc.CardBody([
+                    html.H4("🔍 Smart Movie Search", className="card-title"),
+                    dbc.InputGroup([
+                        dbc.Input(
+                            id='search-input',
+                            type='text',
+                            placeholder='Enter movie title, genre, or keywords...',
+                            debounce=True
+                        ),
+                        dbc.Button("Search", id="search-button", color="primary", n_clicks=0)
+                    ]),
+                    html.Br(),
+                    dbc.Spinner(html.Div(id='search-results'))
+                ])
+            ])
         ])
     ])
 ], fluid=True)
 
-# -----------------------------
-# Callbacks
-# -----------------------------
-# CF Recommendations
+# Enhanced Callbacks
 @app.callback(
     Output('cf-recommendations', 'children'),
     Input('user-dropdown', 'value')
 )
 def update_cf_recs(user_id):
     if not user_id:
-        return ""
-    recs = get_cf_recommendations(user_id, df_ratings, df_movies, cf_algo, N=10)
-    if not recs:
-        return dbc.Alert(f"No personalized recommendations found for User {user_id}.", color="info")
-    return dbc.ListGroup([dbc.ListGroupItem(f"🎬 {title}") for title in recs])
+        return "Please select a user."
+    
+    try:
+        recs = get_cf_recommendations(
+            user_id, df_ratings, df_movies, cf_algo, N=8, min_rating_threshold=3.5
+        )
+        
+        if not recs:
+            return dbc.Alert("No recommendations found for this user.", color="warning")
+        
+        return dbc.ListGroup([
+            dbc.ListGroupItem(f"⭐ {rec}") for rec in recs
+        ])
+        
+    except Exception as e:
+        return dbc.Alert(f"Error generating recommendations: {str(e)}", color="danger")
 
-# Genre Filter
 @app.callback(
     Output('genre-results', 'children'),
     Input('genre-checklist', 'value')
 )
 def update_genre_results(selected_genres):
+    if not selected_genres:
+        return html.P("Select genres to discover movies.", className="text-muted")
+    
     try:
-        if not selected_genres:
-            return html.P("Select genres to see recommendations.", className="text-muted")
-
-        filtered_titles = filter_by_genres(df_movies, selected_genres, limit=20)
+        filtered_titles = filter_by_genres(df_movies, selected_genres, limit=12)
         
         if not filtered_titles:
             return dbc.Alert("No movies found for selected genres.", color="info")
@@ -140,7 +162,51 @@ def update_genre_results(selected_genres):
     except Exception as e:
         return dbc.Alert(f"Error filtering by genres: {str(e)}", color="danger")
 
-# Search
+# REPLACE your existing search callback with this single improved version
+
+def find_movie_match(df_movies, query):
+    """
+    Enhanced movie matching function that handles various query formats
+    """
+    def preprocess_title(title):
+        if pd.isna(title):
+            return ""
+        # Remove year, special chars, normalize spaces, lowercase
+        title = re.sub(r'\(\d{4}\)', '', str(title))
+        title = re.sub(r'[^\w\s]', ' ', title)
+        title = re.sub(r'\s+', ' ', title)
+        return title.lower().strip()
+    
+    processed_query = preprocess_title(query)
+    
+    # Create processed_title column if it doesn't exist
+    if 'processed_title' not in df_movies.columns:
+        df_movies['processed_title'] = df_movies['ML_Title'].apply(preprocess_title)
+    
+    # 1. Exact match
+    exact_matches = df_movies[df_movies['processed_title'] == processed_query]
+    if not exact_matches.empty:
+        return exact_matches.iloc[0]
+    
+    # 2. Substring match (query is contained in title)
+    substring_matches = df_movies[
+        df_movies['processed_title'].str.contains(processed_query, case=False, na=False, regex=False)
+    ]
+    if not substring_matches.empty:
+        return substring_matches.iloc[0]
+    
+    # 3. All words present (for multi-word queries)
+    if len(processed_query.split()) > 1:
+        query_words = processed_query.split()
+        word_pattern = '(?=.*' + ')(?=.*'.join(query_words) + ')'
+        word_matches = df_movies[
+            df_movies['processed_title'].str.contains(word_pattern, case=False, na=False, regex=True)
+        ]
+        if not word_matches.empty:
+            return word_matches.iloc[0]
+    
+    return None
+
 @app.callback(
     Output('search-results', 'children'),
     [Input('search-button', 'n_clicks'), Input('search-input', 'n_submit')],
@@ -151,48 +217,63 @@ def update_search_results(n_clicks, n_submit, query):
         return html.P("Enter a movie title or keyword to get smart recommendations.", className="text-muted")
     
     try:
-        # Get the hybrid recommendations
+        print(f"🔍 Searching for: '{query}'")  # Debug
+        
+        # Get hybrid recommendations
         recs = recommend_from_search(
             query, vectorizer, tfidf_matrix, df_movies, cf_algo, df_ratings,
             top_search=5, top_rec=10
         )
         
-        # Check for the direct search result
-        search_result_df = df_movies[df_movies['processed_title'] == re.sub(r'[^\\w\\s]', ' ', query.lower().strip())]
+        # Find direct match using robust function
+        matched_movie = find_movie_match(df_movies, query)
         
-        # If the searched movie is found, add it to the front of the recommendations list
-        if not search_result_df.empty:
-            searched_title = search_result_df.iloc[0]['ML_Title']
+        # Add matched movie to the beginning if found and not already in recs
+        searched_title = None
+        if matched_movie is not None:
+            searched_title = matched_movie['ML_Title']
+            print(f"✅ Found direct match: '{searched_title}'")  # Debug
+            
             if searched_title not in recs:
                 recs.insert(0, searched_title)
+                print(f"➕ Added to top of recommendations")  # Debug
+            else:
+                print(f"⚠️ Already in recommendations")  # Debug
+        else:
+            print(f"❌ No direct match found")  # Debug
         
         if not recs:
             return dbc.Alert("❌ No recommendations found. Try different keywords.", color="warning")
         
-        # Format the output to clearly label the searched movie
+        # Format output
         list_items = []
         for i, rec in enumerate(recs):
-            is_searched_movie = (not search_result_df.empty and rec == searched_title)
+            is_searched_movie = (i == 0 and searched_title and rec == searched_title)
             
             if is_searched_movie:
                 list_items.append(
-                    dbc.ListGroupItem(html.Div([
-                        html.Strong(f"🎬 {rec}"),
-                        html.Small(" (Your Search)", className="text-muted ms-2")
-                    ]))
+                    dbc.ListGroupItem([
+                        html.Div([
+                            html.Strong(f"🎬 {rec}"),
+                            html.Small(" (Your Search)", className="text-success ms-2")
+                        ])
+                    ])
                 )
             else:
                 list_items.append(
-                    dbc.ListGroupItem(html.Div([
-                        html.Strong(f"🎯 {rec}"),
-                        html.Small(" (Hybrid recommendation)", className="text-muted ms-2")
-                    ]))
+                    dbc.ListGroupItem([
+                        html.Div([
+                            html.Strong(f"🎯 {rec}"),
+                            html.Small(" (Recommendation)", className="text-muted ms-2")
+                        ])
+                    ])
                 )
         
         return dbc.ListGroup(list_items)
         
     except Exception as e:
-        return dbc.Alert(f"Search error: {str(e)}", color="danger")
-
-if __name__ == '__main__':
-    app.run(debug=True)
+        print(f"❌ Search error: {str(e)}")  # Debug
+        return dbc.Alert(f"Search error: {str(e)}", color="danger")    
+# Run the app
+if __name__ == "__main__":
+    app.run(debug=True, host='127.0.0.1', port=8050)
